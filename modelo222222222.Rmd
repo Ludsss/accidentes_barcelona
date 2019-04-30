@@ -1,0 +1,397 @@
+---
+title: "Modelo 2"
+output:
+  html_document:
+    df_print: paged
+---
+
+Preparo la conexión con postgres
+
+```{r}
+#install.packages("RPostgreSQL")
+require("RPostgreSQL")
+
+# Guardar el Password para poder posteriormente eliminarlo
+pw <- { "1796vd"}
+
+# Leer el driver de PostgreSQL
+drv <- dbDriver("PostgreSQL")
+
+# Crear la conexion con la base de datos
+con <- dbConnect(drv, dbname = "postgres",
+                 host = "localhost", port = 5432,
+                 user = "postgres", password = pw)
+# Eliminar el Password
+rm(pw) 
+
+# Chequear que existe la tabla de la base de datos para comprobar la conexión
+dbExistsTable(con, "descripcion_carnet")
+
+```
+
+
+Importo los paquetes más genéricos
+
+```{r}
+library(readr)
+library(ISLR)
+library(ggplot2)
+library(caret)
+library(dplyr)
+library(magrittr)
+library(tidyverse)
+library(rpart)
+library(rpart.plot)
+```
+
+
+
+Importo la data de clima 
+```{r}
+clima <-dbGetQuery(con, "SELECT * FROM descripcion_fecha_accidente_y_su_clima")
+head(clima)
+```
+
+
+Importo la tabla accidente que es la que se relaciona con la fecha 
+
+```{r}
+acc <-dbGetQuery(con, "SELECT * FROM accidente")
+head(acc)
+```
+
+
+Combino las tablas 
+
+```{r}
+datos<-merge(x = clima, y = acc, by = "id_desc_fecha", all = TRUE)
+head(datos)
+```
+
+
+```{r}
+datos1<- datos[,c("id_desc_fecha", "desc_fecha", "id_accidente", "precipitaciones", "temperatura_media", "velocidad_viento_media", "id_desc_dia_semana", "hora")]
+head(datos1)
+```
+
+Se toma parametro como día entre las 7 am y las 9pm 
+```{r}
+for(i in 1:nrow(datos1))
+  {
+  if (datos1$hora[i] <=7.0) { 
+    datos1$horario[i]<-"noche"
+} else if (datos1$hora[i] >21.0){
+    datos1$horario[i]<-"noche"
+} else {
+ datos1$horario[i]<-"dia"
+}
+}
+
+datos1
+```
+
+Ahora se agrupa por fecha y horario
+
+```{r}
+datos2<- datos1 %>%
+  group_by(desc_fecha, horario, precipitaciones, temperatura_media, velocidad_viento_media, id_desc_dia_semana) %>%
+  summarise(cant_accidentes=n())
+datos2
+```
+
+Ahora se determina la estación del año
+
+Invierno: 21 de diciembre al 20 de marzo
+Primavera: 21 de marzo al 20 de junio 
+Verano: 21 de junio al 20 de septiembre
+Otoño: 21 de septiembre al 20 de diciembre
+
+```{r}
+library(hydroTSM)
+
+for(i in 1:nrow(datos2))
+  {datos2$estacion <- time2season(datos2$desc_fecha, out.fmt = "seasons")
+}
+
+datos2
+```
+
+```{r}
+for(i in 1:nrow(datos2))
+  {
+  if (!is.na(datos2$precipitaciones[i])) {
+    if (datos2$precipitaciones[i] ==0.0) { 
+      datos2$precipitacion[i]<-"No llueve"
+  } else if (datos2$precipitaciones[i] <=25.0){
+      datos2$precipitacion[i]<-"Lluvia debil"
+  } else if (datos2$precipitaciones[i] <=50.0){
+      datos2$precipitacion[i]<-"Lluvia moderada"
+  } else {
+    datos2$precipitacion[i]<-"Lluvia fuerte"
+  }}}
+datos2
+```
+```{r}
+for(i in 1:nrow(datos2))
+  {
+  if (!is.na(datos2$temperatura_media[i])) {
+    if (datos2$temperatura_media[i] < 8.0) { 
+      datos2$temperatura[i]<-"Muy frio"
+  } else if (datos2$temperatura_media[i] < 16.0){
+      datos2$temperatura[i]<-"Frio"
+  } else if (datos2$temperatura_media[i] < 24.0){
+      datos2$temperatura[i]<-"Calido"
+  } else {
+    datos2$temperatura[i]<-"Muy caliente"
+  }}}
+datos2
+```
+```{r}
+for(i in 1:nrow(datos2))
+  {
+  if (!is.na(datos2$velocidad_viento_media[i])) {
+    if (datos2$velocidad_viento_media[i] < 4.0) { 
+      datos2$viento[i]<-"Bajo"
+  } else if (datos2$velocidad_viento_media[i] < 8.0){
+      datos2$viento[i]<-"Medio"
+  } else {
+    datos2$viento[i]<-"Alto"
+  }}}
+datos2
+```
+
+  Ahora se convierte en niveles y se eliminan las columnas ue no se van a usar.
+  
+```{r}
+datos3<- datos2[,c("desc_fecha", "horario", "cant_accidentes", "id_desc_dia_semana", "estacion", "precipitacion", "temperatura", "viento")]
+head(datos3)
+```
+Para el horario
+```{r}
+unique(datos3$horario)
+```
+
+-0: dia
+-1: noche
+
+```{r}
+datos3$horario<-ifelse(datos3$horario == "dia", 1, datos3$horario)
+datos3$horario<-ifelse(datos3$horario == "noche", 0, datos3$horario)
+```
+
+```{r}
+unique(datos3$horario)
+```
+
+
+En las estaciones:
+-0: winter
+-1: spring
+-2: summer
+-3: autumm
+
+```{r}
+unique(datos3$estacion)
+```
+
+
+```{r}
+datos3$estacion<-ifelse(datos3$estacion == "winter", 0, datos3$estacion)
+datos3$estacion<-ifelse(datos3$estacion == "spring", 1, datos3$estacion)
+datos3$estacion<-ifelse(datos3$estacion == "summer", 2, datos3$estacion)
+datos3$estacion<-ifelse(datos3$estacion == "autumm", 3, datos3$estacion)
+```
+
+Se comprueba
+
+```{r}
+unique(datos3$estacion)
+```
+
+Ahora se siguen los pasos anteriores con la precipitacion
+
+
+```{r}
+unique(datos3$precipitacion)
+```
+
+En el caso de la lluvia:
+-0: No llueve
+-1: Lluvia debil 
+-2: LLuvia moderada
+-3: Lluvia fuerte
+
+
+```{r}
+datos3$precipitacion<-ifelse(datos3$precipitacion == "No llueve", 0, datos3$precipitacion)
+datos3$precipitacion<-ifelse(datos3$precipitacion == "Lluvia debil", 1, datos3$precipitacion)
+datos3$precipitacion<-ifelse(datos3$precipitacion == "Lluvia moderada", 2, datos3$precipitacion)
+datos3$precipitacion<-ifelse(datos3$precipitacion == "Lluvia fuerte", 3, datos3$precipitacion)
+```
+
+Se comprueba
+
+```{r}
+unique(datos3$precipitacion)
+```
+
+Ahora con temperatura
+```{r}
+unique(datos3$temperatura)
+```
+-0: Muy Frio
+-1: Frio
+-2: Calido
+-3: Muy Caliente
+
+```{r}
+datos3$temperatura<-ifelse(datos3$temperatura == "Muy frio", 0, datos3$temperatura)
+datos3$temperatura<-ifelse(datos3$temperatura == "Frio", 1, datos3$temperatura)
+datos3$temperatura<-ifelse(datos3$temperatura == "Calido", 2, datos3$temperatura)
+datos3$temperatura<-ifelse(datos3$temperatura == "Muy caliente", 3, datos3$temperatura)
+```
+
+Se comprueba
+
+```{r}
+unique(datos3$temperatura)
+```
+
+Se siguen los mismos pasos con el viento 
+
+```{r}
+unique(datos3$viento)
+```
+
+-0: Bajo
+-1: Medio
+-2: Alto
+
+```{r}
+datos3$viento<-ifelse(datos3$viento == "Bajo", 0, datos3$viento)
+datos3$viento<-ifelse(datos3$viento == "Medio", 1, datos3$viento)
+datos3$viento<-ifelse(datos3$viento == "Alto", 2, datos3$viento)
+```
+
+```{r}
+unique(datos3$viento)
+```
+
+Para ver el día de la semana, se importa la tabla desde la base de datos
+
+```{r}
+dia_sem <-dbGetQuery(con, "SELECT * FROM descripcion_dia_semana_accidente")
+dia_sem
+```
+
+Como se puede observar no está en orden, por lo que se procede a ordenar en la tabla. 
+
+1: lunes
+2: martes
+3: miercoles
+4: jueves
+5: viernes
+6: sabado 
+7: domingo 
+
+```{r}
+datos3$id_desc_dia_semana<-ifelse(datos3$id_desc_dia_semana == 1, 2, datos3$id_desc_dia_semana)
+datos3$id_desc_dia_semana<-ifelse(datos3$id_desc_dia_semana == 2, 6, datos3$id_desc_dia_semana)
+datos3$id_desc_dia_semana<-ifelse(datos3$id_desc_dia_semana == 3, 3, datos3$id_desc_dia_semana)
+datos3$id_desc_dia_semana<-ifelse(datos3$id_desc_dia_semana == 4, 5, datos3$id_desc_dia_semana)
+datos3$id_desc_dia_semana<-ifelse(datos3$id_desc_dia_semana == 5, 4, datos3$id_desc_dia_semana)
+datos3$id_desc_dia_semana<-ifelse(datos3$id_desc_dia_semana == 6, 7, datos3$id_desc_dia_semana)
+datos3$id_desc_dia_semana<-ifelse(datos3$id_desc_dia_semana == 7, 1, datos3$id_desc_dia_semana)
+```
+
+
+
+
+##Modelo lineal 
+
+Transformar todas las variables en numericas
+
+```{r}
+str(datos3)
+```
+
+
+```{r}
+datos3$horario<- as.numeric(datos3$horario)
+datos3$estacion<-as.numeric(datos3$estacion)
+datos3$precipitacion<-as.numeric(datos3$precipitacion)
+datos3$temperatura<-as.numeric(datos3$temperatura)
+datos3$viento<-as.numeric(datos3$viento)
+datos3$cant_accidentes<-as.numeric(datos3$cant_accidentes)
+```
+
+Se comprueba
+
+```{r}
+str(datos3)
+```
+
+
+
+```{r}
+names(datos3)
+```
+
+
+
+```{r}
+modelo<- lm(data=datos3, formula= cant_accidentes ~ id_desc_dia_semana + temperatura + horario + estacion + viento + precipitacion)
+```
+
+Visualizar los parámetros del modelo.
+
+```{r}
+summary(modelo)
+```
+
+En esta información se puede apreciar que el p valor es muy pequeño, lo que indica que hay al menos una variable que está relacionada con la variable que se busca predecir. Además el Rˆ2 = 66.32%
+
+Para determinar la calidad del modelo se va a utilizar el método stepwise mixto. 
+
+```{r}
+step(modelo, direction="both", trace=1)
+```
+
+El call arroja la formula 
+      lm(formula = cant_accidentes ~ id_desc_dia_semana + temperatura + horario + estacion + precipitacion, data =        datos3)
+ya que se excluye la variable viento por tener el mayor p valor; es por esto que se actualiza la fórmula del modelo. 
+
+
+```{r}
+modelo1<-lm(cant_accidentes ~ id_desc_dia_semana + temperatura + 
+    horario + estacion + precipitacion, data = datos3)
+```
+
+
+
+```{r}
+par(mfrow = c(1,2))
+plot(modelo1)
+```
+
+El Q-Q plot indica que hay falta de normalidad en los residios.
+
+
+
+```{r}
+require(corrplot)
+corrplot(round(cor(subset(datos3, select=-desc_fecha)), digits = 3), type = "lower")
+```
+
+```{r}
+require(corrplot)
+corrplot.mixed(corr = cor(datos3[,c("horario", "id_desc_dia_semana", "estacion", "precipitacion", "temperatura", "cant_accidentes")],
+                          method = "pearson"))
+```
+
+Los gráficos anteriores permiten observar una correlación negativa muy alta entre la variable horario y la cantidad de accidentes, es decir, hay una correlación inversa.
+
+Ahora se grafican las densidades de las variables 
+
+
+
