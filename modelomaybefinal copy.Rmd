@@ -131,39 +131,11 @@ for(i in 1:nrow(datos2))
   }}}
 datos2
 ```
-```{r}
-for(i in 1:nrow(datos2))
-  {
-  if (!is.na(datos2$temperatura_media[i])) {
-    if (datos2$temperatura_media[i] < 8.0) { 
-      datos2$temperatura[i]<-"Muy frio"
-  } else if (datos2$temperatura_media[i] < 16.0){
-      datos2$temperatura[i]<-"Frio"
-  } else if (datos2$temperatura_media[i] < 24.0){
-      datos2$temperatura[i]<-"Calido"
-  } else {
-    datos2$temperatura[i]<-"Muy caliente"
-  }}}
-datos2
-```
-```{r}
-for(i in 1:nrow(datos2))
-  {
-  if (!is.na(datos2$velocidad_viento_media[i])) {
-    if (datos2$velocidad_viento_media[i] < 4.0) { 
-      datos2$viento[i]<-"Bajo"
-  } else if (datos2$velocidad_viento_media[i] < 8.0){
-      datos2$viento[i]<-"Medio"
-  } else {
-    datos2$viento[i]<-"Alto"
-  }}}
-datos2
-```
 
   Ahora se convierte en niveles y se eliminan las columnas ue no se van a usar.
   
 ```{r}
-datos3<- datos2[,c("desc_fecha", "horario", "cant_accidentes", "id_desc_dia_semana", "estacion", "precipitacion", "temperatura", "viento")]
+datos3<- datos2[,c("desc_fecha", "horario", "cant_accidentes", "id_desc_dia_semana", "estacion", "precipitacion", "temperatura_media", "velocidad_viento_media")]
 head(datos3)
 ```
 Para el horario
@@ -235,48 +207,6 @@ Se comprueba
 unique(datos3$precipitacion)
 ```
 
-Ahora con temperatura
-```{r}
-unique(datos3$temperatura)
-```
--0: Muy Frio
--1: Frio
--2: Calido
--3: Muy Caliente
-
-```{r}
-datos3$temperatura<-ifelse(datos3$temperatura == "Muy frio", 0, datos3$temperatura)
-datos3$temperatura<-ifelse(datos3$temperatura == "Frio", 1, datos3$temperatura)
-datos3$temperatura<-ifelse(datos3$temperatura == "Calido", 2, datos3$temperatura)
-datos3$temperatura<-ifelse(datos3$temperatura == "Muy caliente", 3, datos3$temperatura)
-```
-
-Se comprueba
-
-```{r}
-unique(datos3$temperatura)
-```
-
-Se siguen los mismos pasos con el viento 
-
-```{r}
-unique(datos3$viento)
-```
-
--0: Bajo
--1: Medio
--2: Alto
-
-```{r}
-datos3$viento<-ifelse(datos3$viento == "Bajo", 0, datos3$viento)
-datos3$viento<-ifelse(datos3$viento == "Medio", 1, datos3$viento)
-datos3$viento<-ifelse(datos3$viento == "Alto", 2, datos3$viento)
-```
-
-```{r}
-unique(datos3$viento)
-```
-
 Para ver el día de la semana, se importa la tabla desde la base de datos
 
 ```{r}
@@ -320,8 +250,7 @@ str(datos3)
 datos3$horario<- as.numeric(datos3$horario)
 datos3$estacion<-as.numeric(datos3$estacion)
 datos3$precipitacion<-as.numeric(datos3$precipitacion)
-datos3$temperatura<-as.numeric(datos3$temperatura)
-datos3$viento<-as.numeric(datos3$viento)
+datos3$velocidad_viento_media<-as.numeric(datos3$velocidad_viento_media)
 datos3$cant_accidentes<-as.numeric(datos3$cant_accidentes)
 ```
 
@@ -337,16 +266,41 @@ Revisamos los nombres de las variables
 names(datos3)
 ```
 
+Dividimos en data train y test 
+
+
 ```{r}
-cor.test(datos3$temperatura,datos3$cant_accidentes, method = "pearson")
+shuffle_index <- sample(1:nrow(datos3))
+head(shuffle_index)
+datos3 <- datos3[shuffle_index, ]
 ```
 
-Se afirma que existe una correlación entre la temperatura y la cantidad de accidentes porque el p-value es menor que 0.05
-
+Limpio los datos para que no exista el NA
 
 
 ```{r}
-modelo<- lm(data=datos3, formula= cant_accidentes ~ id_desc_dia_semana + temperatura + horario + estacion + viento + precipitacion)
+clean_datos <- datos3 %>%
+  select(c(cant_accidentes, id_desc_dia_semana, temperatura_media, horario, estacion, velocidad_viento_media, precipitacion)) %>% 
+  na.omit()
+glimpse(clean_datos)
+head(clean_datos)
+clean_datos
+```
+
+
+```{r}
+set.seed(101) # Set Seed so that same sample can be reproduced in future also
+# Now Selecting 75% of data as sample from total 'n' rows of the data  
+sample <- sample.int(n = nrow(clean_datos), size = floor(.75*nrow(clean_datos)), replace = F)
+train <- clean_datos[sample, ]
+test  <- clean_datos[-sample, ]
+```
+
+
+Construimos el modelo
+
+```{r}
+modelo<- lm(data=train, formula= cant_accidentes ~ id_desc_dia_semana + temperatura_media + horario + estacion + velocidad_viento_media + precipitacion)
 ```
 
 Visualizar los parámetros del modelo.
@@ -355,7 +309,7 @@ Visualizar los parámetros del modelo.
 summary(modelo)
 ```
 
-En esta información se puede apreciar que el p valor es muy pequeño, lo que indica que hay al menos una variable que está relacionada con la variable que se busca predecir. Además el Rˆ2 = 68.86%
+En esta información se puede apreciar que el p valor es muy pequeño, lo que indica que hay al menos una variable que está relacionada con la variable que se busca predecir. Además el Rˆ2 = 67.73%
 
 Para determinar la calidad del modelo se va a utilizar el método stepwise mixto. 
 
@@ -364,7 +318,7 @@ step(modelo, direction="both", trace=1)
 ```
 
 El call arroja la formula 
-      lm(formula = cant_accidentes ~ id_desc_dia_semana + temperatura + horario + estacion + precipitacion, data =        datos3)
+      lm(formula = cant_accidentes ~ id_desc_dia_semana + temperatura_media + horario + estacion + precipitacion, data =        datos3)
 ya que se excluye la variable viento por tener el mayor p valor; es por esto que se actualiza la fórmula del modelo. 
 
 
