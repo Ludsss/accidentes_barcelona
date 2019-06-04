@@ -7,7 +7,7 @@ output:
   pdf_document: default
 ---
 
-Conexión con postgres
+Se crea conexión con la bbdd postgres
 ```{r}
 #install.packages("RPostgreSQL")
 require("RPostgreSQL")
@@ -30,7 +30,7 @@ dbExistsTable(con, "descripcion_carnet")
 
 ```
 
-Importo los paquetes más genéricos
+Importación paquetes más genéricos
 ```{r}
 library(readr)
 library(ISLR)
@@ -44,13 +44,13 @@ library(randomForest)
 library(rpart.plot)
 ```
 
-Importo la data de victimas
+Importación data de víctimas
 ```{r}
 victima <- dbGetQuery(con, "SELECT * FROM victima_involucrada")
 head(victima)
 ```
 
-Importo el resto de tablas relacionadas con victimas
+Importación resto de tablas relacionadas con víctimas
 ```{r}
 tipologia <-dbGetQuery(con, "SELECT * FROM descripcion_tipologia_victima")
 head(tipologia)
@@ -73,7 +73,7 @@ head(condicionfisica)
 
 
 
-Combino las tablas
+Combinación de las tablas
 
 ```{r}
 datos1 <- merge(x = victima, y = responsabilidadpeaton, by = "id_desc_responsabilidad_peaton", all = TRUE)
@@ -101,11 +101,12 @@ Comprobación
 head(datos4)
 ```
 
+Revisión de filas y columnas totales
 ```{r}
 dim(datos4)
 ```
 
-Nos quedamos con las columnas que vamos a trabajar
+Selección de columnas con las que se trabajará
 
 ```{r}
 datos5<- datos4[,c("edad", "num_expediente", "desc_condicion_fisica", "desc_responsabilidad_peaton", "desc_sexo", "desc_tipologia")]
@@ -113,7 +114,7 @@ head(datos5)
 ```
 
 
-Agrupación
+Agrupación por cantidad de víctimas
 ```{r}
 datos6 <- datos5 %>%
   group_by(edad, desc_condicion_fisica, desc_responsabilidad_peaton, desc_sexo, desc_tipologia) %>%
@@ -122,7 +123,7 @@ datos6
 ```
 
 
-Partimos el dataset en 2 grupos: entrenamiento y validación 
+Partición del dataset en 2 grupos: entrenamiento y validación 
 ```{r}
 set.seed(12)
 n = nrow(datos6) 
@@ -133,7 +134,7 @@ entrevali <- split(datos6, mascara)
 entrevali$train
 ```
 
-
+Modelo Random Forest (Relación cantidad víctimas vs. edad)
 ```{r}
 model.rf <- randomForest(formula = cantvictimas ~ edad, importance = TRUE ,data = entrevali$train)
 varImpPlot(model.rf)
