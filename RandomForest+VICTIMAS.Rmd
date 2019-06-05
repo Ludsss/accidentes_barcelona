@@ -147,12 +147,12 @@ real <- entrevali$train$cantvictimas
 plot(real, preds)
 
 summary 
-
-RMSE <- sqrt(mean((real - preds)^2))
-RMSE
-
 ```
 
+```{r}
+RMSE <- sqrt(mean((real - preds)^2))
+RMSE
+```
 
 
 
