@@ -49,6 +49,7 @@ library(rpart)
 library(rpart.plot)
 library(hydroTSM)
 library(randomForest)
+library(randomForestExplainer)
 ```
 
 Importo la data de la tabla de accidentes 
@@ -174,6 +175,13 @@ summary(model.rf)
 ```
 
 ```{r}
+importance(model.rf)
+```
+
+
+
+
+```{r}
 preds <- predict(model.rf,data = train)
 real <- train$cant_tipologias_distrito
 plot(real, preds)
@@ -182,5 +190,10 @@ plot(real, preds)
 ```{r}
 RMSE <- sqrt(mean((real - preds)^2))
 RMSE
+```
+
+
+```{r}
+plot_min_depth_distribution(model.rf)
 ```
 
