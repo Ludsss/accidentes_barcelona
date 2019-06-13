@@ -15,12 +15,12 @@ con <- dbConnect(drv, dbname = "postgres",
 # Eliminar el Password
 rm(pw) 
 
-# Chequear que no existe la tabla de la base de datos
-dbExistsTable(con, "desc_marca_vehiculo")
+# Chequear que existe la tabla de la base de datos
+dbExistsTable(con, "descripcion_marca_vehiculo")
 
 
 # Extraer datos de la base de datos
-datos_postgres <- dbGetQuery(con, "SELECT * FROM desc_marca_vehiculo")
+datos_postgres <- dbGetQuery(con, "SELECT * FROM descripcion_marca_vehiculo")
 datos_postgres
 
 

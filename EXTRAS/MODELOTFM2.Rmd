@@ -1,0 +1,495 @@
+---
+title: "HIPOTESIS GRAVEDAD DEL ACCIDENTE EN BASE AL TIPO Y SEXO"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## MODELO 
+
+https://rpubs.com/Joaquin_AR/383283
+
+Importo los paquetes más genéricos
+
+```{r}
+library(readr)
+library(ISLR)
+library(mgcv)
+library(ggplot2)
+library(caret)
+library(dplyr)
+library(magrittr)
+library(tidyverse)
+library(rpart)
+library(rpart.plot)
+```
+
+Importo los datos
+
+```{r}
+datos <- read.csv("Desktop/accidentes_barcelona copy/Personas involucradas/victimas.csv")
+head(datos)
+```
+
+Convierto en character la condición física para poder modificar y agrupar
+```{r}
+datos$Condicion_fisica<-as.character(datos$Condicion_fisica)
+```
+
+Agrupo por gravedad
+
+```{r}
+datos$Condicion_fisica<-ifelse(datos$Condicion_fisica == "Herido grave", "Grave", datos$Condicion_fisica)
+
+datos$Condicion_fisica<-ifelse(datos$Condicion_fisica == "Herido grave: Hospitalización superior a 24h", "Grave", datos$Condicion_fisica)
+
+datos$Condicion_fisica<-ifelse(datos$Condicion_fisica == "Herido leve", "Leve", datos$Condicion_fisica)
+
+datos$Condicion_fisica<-ifelse(datos$Condicion_fisica == "Herido leve: Con asistencia sanitaria en lugar de accidente", "Leve", datos$Condicion_fisica)
+
+datos$Condicion_fisica<-ifelse(datos$Condicion_fisica == "Herido leve: Hospitalización hasta 24h", "Leve", datos$Condicion_fisica)
+
+datos$Condicion_fisica<-ifelse(datos$Condicion_fisica == "Herido leve: Rechaza asistencia sanitaria", "Leve", datos$Condicion_fisica)
+
+datos$Condicion_fisica<-ifelse(datos$Condicion_fisica == "Muerte", "Muerto", datos$Condicion_fisica)
+
+datos$Condicion_fisica<-ifelse(datos$Condicion_fisica == "Muerte (dentro 24h posteriores accidente)", "Muerto", datos$Condicion_fisica)
+
+```
+
+Reviso que se hayen agrupado
+
+```{r}
+unique(datos$Condicion_fisica)
+```
+
+Convierto a factor que es la mejor manera de trabajar los modelos
+
+```{r}
+datos$Condicion_fisica<-as.factor(datos$Condicion_fisica)
+```
+
+Convierto la edad en numerico
+
+```{r}
+datos$Edad<- as.numeric(datos$Edad)
+```
+
+Reviso la estructura nuevamente
+```{r}
+str(datos)
+```
+
+## Análisis exploratorio de los datos
+
+Quiero predecir la variable "Condicion física" que es un factor con varios niveles.
+
+Numero de observaciones del set de datos
+
+```{r}
+nrow(datos)
+```
+
+Detección si hay alguna fila incompleta
+
+```{r}
+any(!complete.cases(datos))
+```
+
+Todas las filas están completas
+
+Veo los niveles que contiene la columna que quiero predecir
+
+```{r}
+levels(datos$Condicion_fisica)
+```
+
+
+## Distribución de las variables respuestas
+
+Cuando se crea un modelo, es muy importante estudiar la distribución de la variable respuesta, ya que, a fin de cuentas, es lo que nos interesa predecir.
+
+```{r}
+ggplot(data = datos, aes(x = Condicion_fisica, y = ..count.., fill = Condicion_fisica)) +
+  geom_bar() +
+  scale_fill_manual(values = c( "red", "green", "black")) +
+  labs(title = "Condición") +
+  theme_bw() +
+  theme(legend.position = "bottom")
+```
+
+
+
+Tabla de frecuencias
+
+```{r}
+table(datos$Condicion_fisica)
+```
+
+
+```{r}
+prop.table(table(datos$Condicion_fisica)) %>% round(digits = 4)
+```
+
+Para que un modelo predictivo sea útil, debe de tener un porcentaje de acierto superior a lo esperado por azar o a un determinado nivel basal. En problemas de clasificación, el nivel basal es el que se obtiene si se asignan todas las observaciones a la clase mayoritaria (la moda). En el caso de los accidentes de tráfico, dado que el 98% de los pasajeros resultaron heridos leves, si siempre se predice Gravedad = Leve, el porcentaje de aciertos será aproximadamente del 98%. Este es el porcentaje mínimo que hay que intentar superar con los modelos predictivos. (Siendo estrictos, este porcentaje tendrá que ser recalculado únicamente con el conjunto de entrenamiento).
+
+## Distribución de variables 
+
+El objetivo de estudio es predecir la gravedad del accidente. Analizando los datos de esta forma, se pueden empezar a extraer ideas sobre qué variables están más relacionadas con la gravedad.
+
+Analizando la variable edad al ser numérica
+
+```{r}
+library(ggpubr)
+p1 <- ggplot(data = datos, aes(x = Edad, fill = Condicion_fisica)) +
+      geom_density(alpha = 0.5) +
+      scale_fill_manual(values = c("red", "green", "black")) +
+      geom_rug(aes(color = Condicion_fisica), alpha = 0.5) +
+      scale_color_manual(values = c("red", "green", "black")) +
+      theme_bw()
+p2 <- ggplot(data = datos, aes(x = Condicion_fisica, y = Edad, color = Condicion_fisica)) +
+      geom_boxplot(outlier.shape = NA) +
+      geom_jitter(alpha = 0.3, width = 0.15) +
+      scale_color_manual(values = c("red", "green", "black")) +
+      theme_bw()
+final_plot <- ggarrange(p1, p2, legend = "top")
+final_plot <- annotate_figure(final_plot, top = text_grob("Edad", size = 15))
+final_plot
+```
+
+
+Analizando el tipo de persona
+
+```{r}
+ggplot(data = datos, aes(x = Tipo_persona, y = ..count.., fill = Condicion_fisica)) +
+  geom_bar() +
+  scale_fill_manual(values = c("red", "green", "black")) +
+  labs(title = "Tipo persona") +
+  theme_bw() +
+  theme(legend.position = "bottom")
+```
+
+Tabla de frecuencias relativas de gravedad por tipo
+
+```{r}
+prop.table(table(datos$Tipo_persona, datos$Condicion_fisica), margin = 1) %>% round(digits = 4)
+```
+
+Ahora con la variable sexo 
+
+```{r}
+ggplot(data = datos, aes(x = Sexo, y = ..count.., fill = Condicion_fisica)) +
+  geom_bar() +
+  scale_fill_manual(values = c("red", "green", "black")) +
+  labs(title = "Sexo") +
+  theme_bw() +
+  theme(legend.position = "bottom")
+```
+
+
+Tabla de frecuencias relativas de gravedad por clase
+
+```{r}
+prop.table(table(datos$Sexo, datos$Condicion_fisica), margin = 1) %>% round(digits = 4)
+```
+
+
+##Contraste de proporciones
+
+Para la identificación de potenciales predictores cualitativos, es interesante encontrar las variables y niveles de las mismas que muestran una proporción de estado leve alejada de lo esperado por el nivel basal, en este caso el 98%
+
+Para facilitar este tipo de análisis, resulta útil crear variables dummy con todos los niveles de las variables cualitativas (proceso conocido como binarización o one hot encoding) y aplicar un test de contraste de proporciones.
+
+```{r}
+head(datos)
+```
+
+
+```{r}
+# Se excluyen las variables continuas y las cualitativas que no agrupan a las
+# victimas.
+datos_cualitativos <- datos %>%
+                      select(-Edad, -Causa_peaton, -Num_expediente, -Tipo_vehiculo)
+
+datos_cualitativos_tidy <- datos_cualitativos %>%
+                           gather(key = "variable", value = "grupo", -Condicion_fisica)
+
+# Se eliminan los valores NA para que no se interpreten como un grupo
+datos_cualitativos_tidy <- datos_cualitativos_tidy %>% filter(!is.na(grupo))
+  
+# Se añade un identificador formado por el nombre de la variable y el grupo 
+datos_cualitativos_tidy <- datos_cualitativos_tidy %>%
+                           mutate(variable_grupo = paste(variable, grupo, sep = "_"))
+
+```
+
+
+```{r}
+# Función que calcula el test de proporciones para la columna "Condicion fisica" de un df
+test_proporcion <- function(df){
+  n_leves <- sum(df$Condicion_fisica == "Leve") 
+  n_graves     <- sum(df$Condicion_fisica == "Grave")
+  n_muertos     <- sum(df$Condicion_fisica == "Muertos")
+  n_total <- n_leves + n_graves + n_muertos
+  test <- prop.test(x = n_leves, n = n_total, p = 0.9807)
+  prop_leves <- n_leves / n_total
+  return(data.frame(p_value = test$p.value, prop_leves))
+}
+
+# Se agrupan los datos por "variable_grupo" y se aplica a cada grupo la función
+# test_proporcion()
+analisis_prop <- datos_cualitativos_tidy %>%
+                 group_by(variable_grupo) %>%
+                 nest() %>%
+                 arrange(variable_grupo) %>%
+                 mutate(prop_test = map(.x = data, .f = test_proporcion)) %>%
+                 unnest(prop_test) %>%
+                 arrange(p_value) %>% 
+                 select(variable_grupo,p_value, prop_leves)
+analisis_prop
+```
+
+```{r}
+# Representación gráfica de la distribución de los 6 grupos con menor p-value
+top6_grupos <- analisis_prop %>% pull(variable_grupo) %>% head(6)
+
+# Se crea una función que, dados un dataframe y el nombre de un grupo, genere la
+# representación gráfica de supervivientes y no supervivientes.
+plot_grupo <- function(grupo, df, threshold_line = 0.9807){
+
+  p <- ggplot(data = df, aes(x = 1, y = ..count.., fill = Condicion_fisica)) +
+            geom_bar() +
+            scale_fill_manual(values = c("red", "green", "black")) +
+            # Se añade una línea horizontal en el nivel basal
+            geom_hline(yintercept = nrow(df) * threshold_line,
+                       linetype = "dashed") +
+            labs(title = grupo) +
+            theme_bw() +
+            theme(legend.position = "bottom",
+                  axis.text.x = element_blank(),
+                  axis.title.x = element_blank(),
+                  axis.ticks.x = element_blank())
+  return(p)
+}
+
+datos_graficos <- datos_cualitativos_tidy %>%
+                  filter(variable_grupo %in% top6_grupos) %>%
+                  group_by(variable_grupo) %>%
+                  nest() %>%
+                  arrange(variable_grupo)
+
+plots <- map2(datos_graficos$variable_grupo, .y = datos_graficos$data,
+              .f = plot_grupo)
+
+ggarrange(plotlist = plots, common.legend = TRUE)
+```
+
+El listado obtenido muestra, ordenados de menor a mayor p-value, cada uno de los posibles grupos simples en los que se puede diferenciar a las victimas
+
+## División de los datos en entrenamiento y test
+
+```{r}
+#set.seed(123)
+# Se crean los índices de las observaciones de entrenamiento
+#train <- createDataPartition(y = datos$Condicion_fisica, p = 0.8, list = FALSE, times = 1)
+#datos_train <- datos[train, ]
+#datos_test  <- datos[-train, ]
+```
+
+
+
+Los datos no están ordenados aleatoriamente sino secuencialmente de 
+acuerdo a la variable categórica de interés. Esto es un problema importante y se debe 
+corregir antes de dividir los datos en entrenamiento y test. Para desordenar la lista de 
+observaciones, se puede usar la función sample() que genera indices aleatorios.
+
+```{r}
+shuffle_index <- sample(1:nrow(datos))
+head(shuffle_index)
+```
+
+
+Ahora se usa estos índices para generar un ordenamiento aleatorio del conjunto de datos.
+
+```{r}
+datos <- datos[shuffle_index, ]
+head(datos)
+```
+
+Antes de entrenar el modelo vamos a dividir el conjunto de datos en entrenamiento y test. La práctica común es 80-20. Crearemos una función con este propósito.
+
+
+Limpio los datos para que no exista el NA
+
+
+```{r}
+clean_datos <- datos %>%
+  select(c(Num_expediente, Condicion_fisica, Tipo_persona, Sexo)) %>% 
+  na.omit()
+glimpse(clean_datos)
+head(clean_datos)
+clean_datos
+```
+
+
+```{r}
+datos_train <- clean_datos %>% dplyr::sample_frac(.8)
+datos_test  <- dplyr::anti_join(clean_datos, datos_train, by = 'Num_expediente') # se debe tener un id
+datos_train <- dplyr::select(datos_train, -Num_expediente)
+datos_test <- dplyr::select(datos_test, -Num_expediente)
+```
+
+
+Se verifica que la distribución de la variable respuesta es similar en el conjunto de entrenamiento y en el de test
+
+```{r}
+prop.table(table(datos_train$Condicion_fisica))
+```
+
+
+```{r}
+prop.table(table(datos_test$Condicion_fisica))
+```
+
+Instalar rpart.plot rpart.plot es una librearía que sirve para visualizaciones más elegantes de árboles de decisión. 
+Se debe instalar a través de la consola.
+
+
+
+#Variables con varianza próxima a cero
+No se deben incluir en el modelo predictores que contengan un único valor (cero-varianza) ya que no aportan información. Tampoco es conveniente incluir predictores que tengan una varianza próxima a cero, es decir, predictores que toman solo unos pocos valores, de los cuales, algunos aparecen con muy poca frecuencia. El problema con estos últimos es que pueden convertirse en predictores con varianza cero cuando se dividen las observaciones por validación cruzada o bootstrap.
+
+
+
+```{r}
+datos %>% select(Sexo, Tipo_persona) %>%
+          nearZeroVar(saveMetrics = TRUE)
+```
+
+Ratio de frecuencias: ratio entre la frecuencia del valor más común y la frecuencia del segundo valor más común. Este ratio tiende a 1 si las frecuencias están equidistribuidas y a valores grandes cuando la frecuencia del valor mayoritario supera por mucho al resto (el denominador es un número decimal pequeño. 
+
+En este caso no se incluye la condición física dado que es la que voy a predecir. 
+
+Entre los predictores incluidos en el modelo, no se detecta ninguno con varianza cero o próxima a cero.
+
+#Binarización de variables cualitativas
+
+La binarización consiste en crear nuevas variables dummy con cada uno de los niveles de las variables cualitativas. A este proceso también se le conoce como one hot encoding. Por ejemplo, una variable llamada color que contenga los niveles rojo, verde y azul, se convertirá en tres nuevas variables (color_rojo, color_verde, color_azul), todas con el valor 0 excepto la que coincide con la observación, que toma el valor 1.
+
+Por defecto, la función step_dummy(all_nominal()) binariza todas las variables almacenadas como tipo factor o character. Además, elimina uno de los niveles para evitar redundancias. Volviendo al ejemplo anterior, no es necesario almacenar las tres variables, ya que, si color_rojo y color_verde toman el valor 0, la variable color_azul toma necesariamente el valor 1. Si color_rojo o color_verde toman el valor 1, entonces color_azul es necesariamente 0.
+
+```{r}
+library(recipes)
+# Se crea un objeto recipe() con la variable respuesta y los predictores. 
+
+objeto_recipe <- recipe(formula = Condicion_fisica ~ Tipo_persona + Sexo,
+                        data =  datos_train)
+objeto_recipe
+```
+
+
+
+```{r}
+objeto_recipe <- objeto_recipe %>% step_dummy(all_nominal(), -all_outcomes())
+```
+
+Se entrena el objeto recipe
+
+```{r}
+trained_recipe <- prep(objeto_recipe, training = datos_train)
+trained_recipe
+```
+
+
+```{r}
+# Se aplican las transformaciones al conjunto de entrenamiento y de test
+datos_train_prep <- bake(trained_recipe, newdata = datos_train)
+datos_test_prep  <- bake(trained_recipe, newdata = datos_test)
+
+glimpse(datos_train_prep)
+```
+
+```{r}
+# ELIMINACIÓN RECURSIVA MEDIANTE RANDOM FOREST Y BOOTSTRAPPING
+# =============================================================================
+
+# Se paraleliza el proceso para que sea más rápido. El número de cores debe 
+# seleccionarse en función del ordenador que se está empleando.
+library(doMC)
+library(mlbench)
+library(Hmisc)
+library(randomForest)
+registerDoMC(cores = 4)
+
+# Tamaño de los conjuntos de predictores analizados
+subsets <- c(3:11)
+
+# Número de resamples para el proceso de bootstrapping
+repeticiones <- 30
+
+# Se crea una semilla para cada repetición de validación. Esto solo es necesario si
+# se quiere asegurar la reproducibilidad de los resultados, ya que la validación
+# cruzada y el bootstrapping implican selección aleatoria.
+
+# El número de semillas necesarias depende del número total de repeticiones: 
+# Se necesitan B+1 elementos donde B es el número total de particiones (CV) o
+# resampling (bootstrapping). Los primeros B elementos deben ser vectores formados
+# por M números enteros, donde M es el número de modelos ajustados, que en este caso
+# se corresponde con el número de tamaños. El último elemento solo necesita un único
+# número para ajustar el modelo final.
+set.seed(123)
+seeds <- vector(mode = "list", length = repeticiones + 1)
+for (i in 1:repeticiones) {
+  seeds[[i]] <- sample.int(1000, length(subsets))
+} 
+seeds[[repeticiones + 1]] <- sample.int(1000, 1)
+
+# Se crea un control de entrenamiento donde se define el tipo de modelo empleado
+# para la selección de variables, en este caso random forest, la estrategia de
+# resampling, en este caso bootstrapping con 30 repeticiones, y las semillas para
+# cada repetición. Con el argumento returnResamp = "all" se especifica que se
+# almacene la información de todos los modelos generados en todas las repeticiones.
+ctrl_rfe <- rfeControl(functions = rfFuncs, method = "boot", number = repeticiones,
+                       returnResamp = "all", allowParallel = TRUE, verbose = FALSE,
+                       seeds = seeds)
+
+
+
+# Se ejecuta la eliminación recursiva de predictores
+set.seed(342)
+rf_rfe <- rfe(Condicion_fisica ~ ., data = datos_train_prep,
+              sizes = subsets,
+              metric = "Accuracy",
+              # El accuracy es la proporción de clasificaciones correctas
+              rfeControl = ctrl_rfe,
+              ntree = 500)
+# Dentro de rfe() se pueden especificar argumentos para el modelo empleado, por
+# ejemplo, el hiperparámetro ntree=500.
+```
+
+
+Se muestra una tabla resumen con los resultados
+
+```{r}
+rf_rfe
+```
+
+```{r}
+rf_rfe$optVariables
+```
+
+```{r}
+# Valores de accuracy y kappa para cada tamaño de modelo en cada resample.
+rf_rfe$resample %>% select(1, 2) %>% head(8)
+```
+
+
+Se puede observar que el accuracy es de aproximadamente 98% en todos los casos. Esto concuerda con los datos ya que el 98% de los heridos son leves; es decir, que si quiero predecir de que sea leve voy a acertar el 98% de las veces. 
+
+En realidad este modelo es más descriptivo que predictivo dado a que como se ha mencionado anteriormente el 98% de los datos se agrupan en heridos leves 
+
+
