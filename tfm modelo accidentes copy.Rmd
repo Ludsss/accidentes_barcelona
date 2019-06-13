@@ -9,7 +9,7 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ##Tabla accidentes 
 
-Preparo la conección con R
+Se hace la conexión con R
 
 ```{r}
 
@@ -35,7 +35,7 @@ dbExistsTable(con, "accidente")
 ```
 
 
-Importo los paquetes más genéricos
+Se importan los paquetes más genéricos
 
 ```{r}
 library(readr)
@@ -52,16 +52,15 @@ library(randomForest)
 library(randomForestExplainer)
 ```
 
-Importo la data de la tabla de accidentes 
+Se importa la data de la tabla de accidentes 
 
 ```{r}
 accidente<- dbGetQuery(con, "SELECT * FROM accidente")
 head(accidente)
 ```
 
-Quiero agrupar por accidentes por distrito. Para ello:
 
-Hago un join para conocer el nombre del distrito y la fecha: 
+Se hace un join para conocer el nombre del distrito y la fecha: 
 
 ```{r}
 datos <- dbGetQuery(con, 
@@ -74,7 +73,7 @@ INNER JOIN descripcion_tipologia_accidente ON accidente.id_desc_tipologia = desc
 head(datos)
 ```
 
-Selecciono las columnas que voy a utilizar:
+Se seleccionan las columnas que voy a utilizar:
 
 ```{r}
 datos1<- datos[,c("desc_distrito", "desc_fecha","id_desc_dia_semana", "hora", "desc_tipologia")]
@@ -88,7 +87,7 @@ dia_sem <-dbGetQuery(con, "SELECT * FROM descripcion_dia_semana_accidente")
 dia_sem
 ```
 
-Como se puede observar no están ordenados por lo que procedo a ordenarlos:
+Como se puede observar no están ordenados por lo que se procede a ordenarlos:
 
 ```{r}
 datos1$id_desc_dia_semana<-ifelse(datos1$id_desc_dia_semana == 1, 7, datos1$id_desc_dia_semana)
@@ -101,8 +100,7 @@ datos1$id_desc_dia_semana<-ifelse(datos1$id_desc_dia_semana == 7, 6, datos1$id_d
 ```
 
 
-
-También determino si es de madrugada, mañana, tarde o noche:
+También se determina si es de madrugada, mañana, tarde o noche:
 
 ```{r}
 for(i in 1:nrow(datos1))
@@ -116,7 +114,7 @@ for(i in 1:nrow(datos1))
 head(datos1)
 ```
 
-
+Se seleccionan las columnas que se van a utilizar
 
 ```{r}
 datos2<-datos1[,c("desc_distrito","id_desc_dia_semana", "horario", "desc_tipologia")]
@@ -124,7 +122,7 @@ head(datos2)
 ```
 
 
-
+Se transforma en factor
 
 ```{r}
 datos2$id_desc_dia_semana<-as.factor(datos2$id_desc_dia_semana)
@@ -133,10 +131,13 @@ datos2$horario<-as.factor(datos2$horario)
 datos2$desc_distrito<-as.factor(datos2$desc_distrito)
 ```
 
+
+Se estudian las variables 
 ```{r}
 str(datos2)
 ```
 
+Se soluciona el inconveniente con los NAs
 
 ```{r}
 for (i in 1:4) datos[sample(150, sample(20)), i] <- NA
@@ -145,7 +146,7 @@ iris.roughfix <- na.roughfix(datos2)
 
 
 
-Partimos el dataset en 2 grupos para trabajar entrenamiento y validación
+Se parte el dataset en 2 grupos para trabajar entrenamiento y validación
 
 ```{r}
 set.seed(12)
@@ -162,22 +163,63 @@ train <- datos2[train_ind, ]
 test <- datos2[-train_ind, ]
 ```
 
-Ahora hago el modelo
+Ahora se plantea el modelo
 
 ```{r}
 model.rf <- randomForest(formula = desc_tipologia ~ desc_distrito + horario + id_desc_dia_semana, importance = TRUE ,data = train, na.action=na.roughfix)
 varImpPlot(model.rf)
 ```
 
+Se hace un resumen con los resultados del modelo: 
 
 ```{r}
 summary(model.rf)
 ```
 
+Para observar las variables más importantes:
+
 ```{r}
 importance(model.rf)
 ```
 
+
+
+Se hace el estudio con Random Explainer
+
+```{r}
+min_depth_frame <- min_depth_distribution(model.rf)
+save(min_depth_frame, file = "min_depth_frame.rda")
+load("min_depth_frame.rda")
+head(min_depth_frame, n = 10)
+```
+
+
+
+```{r}
+plot_min_depth_distribution(min_depth_frame)
+```
+
+
+```{r}
+importance_frame <- measure_importance(model.rf)
+save(importance_frame, file = "importance_frame.rda")
+load("importance_frame.rda")
+importance_frame
+
+```
+
+```{r}
+plot_multi_way_importance(importance_frame, size_measure = "no_of_nodes")
+```
+
+
+```{r}
+plot_importance_ggpairs(importance_frame)
+```
+
+```{r}
+explain_forest(model.rf, interactions = TRUE, data = datos2)
+```
 
 
 
@@ -193,7 +235,4 @@ RMSE
 ```
 
 
-```{r}
-plot_min_depth_distribution(model.rf)
-```
 
