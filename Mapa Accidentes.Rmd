@@ -1,0 +1,115 @@
+---
+title: "Mapa Accidentes"
+author: "Ludovica Verrieri"
+date: "6/10/2019"
+output: html_document
+---
+
+## Estudio de ubicaciones con más accidentes
+
+Con el modelo descriptivo obtenido a través del Power BI, se puede observar que el barrio con más accidentes es **la Dreta de l'Eixample**. Ahora se quiere buscar si dentro de este barrio hay unas ubicaciones donde los accidentes son más frecuentes. Por eso, se diseñan todas las ubicaciones de los accidentes en un mapa y se sacan visualmente los puntos con más accidentes.
+
+### 1. Conexión de la BBDD a R
+
+```{r}
+#install.packages("RPostgreSQL")
+require("RPostgreSQL")
+
+# Guardar el Password para poder posteriormente eliminarlo
+pw <- {"ludo"}
+
+# Leer el driver de PostgreSQL
+drv <- dbDriver("PostgreSQL")
+
+# Crear la conexion con la base de datos
+con <- dbConnect(drv, dbname = "accidentes_barcelona",
+                 host = "192.168.0.165", port = 5432,
+                 user = "postgres", password = pw)
+
+# Eliminar el Password
+rm(pw) 
+
+# Chequear que no existe la tabla de la base de datos
+dbExistsTable(con, "descripcion_marca_vehiculo")
+```
+
+### 2. Extracción de los datos necesarios por el estudio
+
+Se busca el código del barrio **la Dreta de l'Eixample**.
+
+```{r}
+barrios <- dbGetQuery(con, "SELECT * FROM descripcion_barrio_accidente")
+barrios
+```
+
+Este barrio tiene código 7. Entonces se buscan latitud y longitud de las ubicaciones de los accidentes en este barrio.
+
+```{r}
+datos <- dbGetQuery(con, "SELECT latitud, longitud FROM accidente WHERE id_desc_barrio = 7 AND latitud != -1.0 AND longitud != -1.0")
+head(datos)
+```
+
+### 3. Diseño del mapa de accidentes
+
+Se instalan unas librerias necesarias para diseñar los puntos en un mapa.
+
+```{r}
+#install.packages("devtools")
+library(devtools)
+#install_github("rOpenSpain/caRtociudad")
+library(caRtociudad)
+#install.packages("ggmap")
+library(ggmap)
+```
+
+Se elige cómo centro del mapa un punto más o menos central del barrio, para visualizar el mapa de manera mejor. Entonces se diseña el mapa de los accidentes.
+
+```{r}
+bcn <- cartociudad_geocode("calle del bruc 80, 08009 barcelona")
+mapa_bcn <- cartociudad_get_map(c(bcn$lat, bcn$lng), 2.7)
+mapa <- ggmap::ggmap(mapa_bcn)
+mapa + geom_point(aes(x = longitud, y = latitud), data = datos, size = 1)
+```
+
+Se nota que hay un deslizamiento constante en los puntos. En los CSVs de origen de los años 2016 y 2017 se guardaba la información de latitud y longitud, entonces es suficiente mirar estos valores y compararlos con los valores obtenidos durante la transformación de UTM a latitud y longitud. Se encuentra así el valor que se tiene que restar.
+
+```{r}
+datos$longitud <- datos$longitud - 0.001103145
+datos$latitud <- datos$latitud - 0.00184649
+```
+
+Se vuelve a diseñar el mapa para verificar que se haya solucionado el problema de deslizamiento.
+
+```{r}
+mapa + geom_point(aes(x = longitud, y = latitud), data = datos, size = 1)
+```
+
+Se puede notar que los accidentes se distribuyen de manera más o menos uniforme en todas las calles de este barrio. En particular, parecen ligeramente más frecuentes los accidentes al cruce entre **Carrer de Pau Claris** y **Calle Provenza**, al cruce entre **Avenida Diagonal** y **Paseo de San Juan** y en **Plaza de Tetuán**.
+
+## 4. Estudio de accidentes mortales
+
+Parece interesante saber también la distribución de los accidentes mortales. Entonces se repite el proceso utilizando sólo las coordenadas de los accidentes mortales.
+
+Se busca el código del la condición fisica de la victima **Muerte**.
+
+```{r}
+condicion_fisica <- dbGetQuery(con, "SELECT * FROM descripcion_condicion_fisica_victima")
+condicion_fisica
+```
+
+Los muertos tienen código 3 y 8. Entonces se buscan las ubicaciones de los accidentes con muertos.
+
+```{r}
+datos <- dbGetQuery(con, "SELECT accidente.num_expediente, latitud, longitud FROM accidente, victima_involucrada WHERE accidente.num_expediente = victima_involucrada.num_expediente AND id_desc_condicion_fisica IN (3, 8) AND latitud != -1.0 AND longitud != -1.0 AND id_desc_barrio = 7")
+datos
+```
+
+Se diseñan estos accidentes en el mapa.
+
+```{r}
+datos$longitud <- datos$longitud - 0.001103145
+datos$latitud <- datos$latitud - 0.00184649
+mapa + geom_point(aes(x = longitud, y = latitud), data = datos, size = 3)
+```
+
+Se puede notar que dos accidentes mortales sobre tres tienen como ubicación **Avenida Diagonal**, a la altura de **la Casa Comalat**. Se sospecha por eso que allí pueda existir un problema de circulación.
