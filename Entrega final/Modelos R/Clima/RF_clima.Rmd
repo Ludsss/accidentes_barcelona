@@ -1,0 +1,258 @@
+---
+title: "Random Forest"
+author: "ASO"
+date: "10/5/2019"
+output: html_document
+---
+
+Conexión con postgres
+```{r}
+#install.packages("RPostgreSQL")
+require("RPostgreSQL")
+
+# Guardar el Password para poder posteriormente eliminarlo
+pw <- {"ludo"}
+
+# Leer el driver de PostgreSQL
+drv <- dbDriver("PostgreSQL")
+
+# Crear la conexion con la base de datos
+con <- dbConnect(drv, dbname = "accidentes_barcelona",
+                 host = "192.168.0.165", port = 5432,
+                 user = "postgres", password = pw)
+
+# Eliminar el Password
+rm(pw) 
+
+# Chequear que existe la tabla de la base de datos para comprobar la conexión
+dbExistsTable(con, "descripcion_carnet")
+
+```
+
+Importo los paquetes más genéricos
+```{r}
+library(readr)
+library(ISLR)
+library(ggplot2)
+library(caret)
+library(dplyr)
+library(magrittr)
+library(tidyverse)
+library(rpart)
+library(randomForest)
+library(rpart.plot)
+```
+
+Importo la data de clima 
+```{r}
+clima <- dbGetQuery(con, "SELECT * FROM descripcion_fecha_accidente_y_su_clima")
+head(clima)
+```
+
+Importo la tabla accidente que es la que se relaciona con la fecha 
+```{r}
+acc <-dbGetQuery(con, "SELECT * FROM accidente")
+head(acc)
+```
+
+Combino las tablas 
+```{r}
+datos <- merge(x = clima, y = acc, by = "id_desc_fecha", all = TRUE)
+names(datos)
+```
+
+Seleccionar solo una cuantas columnas de la combinación de accidentes y clima 
+```{r}
+datos1<- datos[ ,c("id_desc_fecha", "desc_fecha", "num_expediente", "precipitaciones", "temperatura_media", "velocidad_viento_media", "id_desc_dia_semana", "hora")]
+head(datos1)
+```
+
+Se crean rangos en el día: 
+ - 0h a 7h  : madrugada
+ - 7h a 13h : mañana
+ - 13h a 19h: tarde
+ - 19h a 20h: noche
+ * Nota: averiguar el flujo de carros durante el dia, niveles de transito. 
+```{r}
+for(i in 1:nrow(datos1))
+  {
+  if      (datos1$hora[i] < 7.0)  { datos1$horario[i]<-"madrugada"} 
+  else if (datos1$hora[i] >= 19.0){ datos1$horario[i]<-"noche"}
+  else if (datos1$hora[i] >= 13.0){ datos1$horario[i]<-"tarde"}
+  else                            { datos1$horario[i]<-"mañana"}
+  }
+
+datos1
+```
+
+Ahora se agrupa por fecha y horario
+
+```{r}
+datos2<- datos1 %>%
+  group_by(desc_fecha, horario, precipitaciones, temperatura_media, velocidad_viento_media, id_desc_dia_semana) %>%
+  summarise(cant_accidentes=n())
+datos2
+```
+
+Ahora se determina la estación del año
+
+Invierno: 21 de diciembre al 20 de marzo
+Primavera: 21 de marzo al 20 de junio 
+Verano: 21 de junio al 20 de septiembre
+Otoño: 21 de septiembre al 20 de diciembre
+
+```{r}
+library(hydroTSM)
+
+for(i in 1:nrow(datos2))
+  {datos2$estacion <- time2season(datos2$desc_fecha, out.fmt = "seasons")
+}
+
+datos2
+```
+Nivel de la Lluvia
+```{r}
+for(i in 1:nrow(datos2))
+  {
+  if (!is.na(datos2$precipitaciones[i])) {
+    if (datos2$precipitaciones[i] ==0.0) { 
+      datos2$precipitacion[i]<-"No llueve"
+  } else if (datos2$precipitaciones[i] <=25.0){
+      datos2$precipitacion[i]<-"Lluvia debil"
+  } else if (datos2$precipitaciones[i] <=50.0){
+      datos2$precipitacion[i]<-"Lluvia moderada"
+  } else {
+    datos2$precipitacion[i]<-"Lluvia fuerte"
+  }}}
+datos2
+```
+
+Nivel de Temperatura
+```{r}
+for(i in 1:nrow(datos2))
+  {
+  if (!is.na(datos2$temperatura_media[i])) {
+    if (datos2$temperatura_media[i] < 8.0) { 
+      datos2$temperatura[i]<-"Muy frio"
+  } else if (datos2$temperatura_media[i] < 16.0){
+      datos2$temperatura[i]<-"Frio"
+  } else if (datos2$temperatura_media[i] < 24.0){
+      datos2$temperatura[i]<-"Calido"
+  } else {
+    datos2$temperatura[i]<-"Muy caliente"
+  }}}
+datos2
+```
+Nivel del viento
+```{r}
+for(i in 1:nrow(datos2))
+  {
+  if (!is.na(datos2$velocidad_viento_media[i])) {
+    if (datos2$velocidad_viento_media[i] < 4.0) { 
+      datos2$viento[i]<-"Bajo"
+  } else if (datos2$velocidad_viento_media[i] < 8.0){
+      datos2$viento[i]<-"Medio"
+  } else {
+    datos2$viento[i]<-"Alto"
+  }}}
+datos2
+```
+
+Nos quedamos con las columnas que vamos a trabajar
+```{r}
+datos3<- datos2[,c("desc_fecha", "horario", "cant_accidentes", "id_desc_dia_semana", "estacion", "precipitacion", "temperatura", "viento")]
+head(datos3)
+```
+
+########################################################################################################################################################################################################################################################################################################################################################################################################################################################################################
+
+Importo la tabla vehiculos que se relaciona numero de expediente 
+```{r}
+veh <-dbGetQuery(con, "SELECT * FROM vehiculo_involucrado")
+dim(veh)
+```
+########################################################################################################################################################################################################################################################################################################################################################################################################################################################################################
+
+```{r}
+# para jalar nombres reales de los datos 
+dia_sem <-dbGetQuery(con, "SELECT * FROM descripcion_dia_semana_accidente")
+dia_sem
+```
+
+Como se puede observar no está en orden, por lo que se procede a ordenar en la tabla. 
+
+1: lunes
+2: martes
+3: miercoles
+4: jueves
+5: viernes
+6: sabado 
+7: domingo 
+
+```{r}
+# para reemplazar
+datos3$id_desc_dia_semana<-ifelse(datos3$id_desc_dia_semana == 1, 2, datos3$id_desc_dia_semana)
+datos3$id_desc_dia_semana<-ifelse(datos3$id_desc_dia_semana == 2, 6, datos3$id_desc_dia_semana)
+datos3$id_desc_dia_semana<-ifelse(datos3$id_desc_dia_semana == 3, 3, datos3$id_desc_dia_semana)
+datos3$id_desc_dia_semana<-ifelse(datos3$id_desc_dia_semana == 4, 5, datos3$id_desc_dia_semana)
+datos3$id_desc_dia_semana<-ifelse(datos3$id_desc_dia_semana == 5, 4, datos3$id_desc_dia_semana)
+datos3$id_desc_dia_semana<-ifelse(datos3$id_desc_dia_semana == 6, 7, datos3$id_desc_dia_semana)
+datos3$id_desc_dia_semana<-ifelse(datos3$id_desc_dia_semana == 7, 1, datos3$id_desc_dia_semana)
+```
+
+
+```{r}
+datos3$estacion      <- as.factor(datos3$estacion)
+datos3$precipitacion <- as.factor(datos3$precipitacion)
+datos3$temperatura   <- as.factor(datos3$temperatura)
+datos3$viento        <- as.factor(datos3$viento)
+datos3$horario       <- as.factor(datos3$horario)
+str(datos3)
+```
+```{r}
+datos4 <- datos3 
+#datos4$desc_fecha <- NULL
+#datos4$horario <- NULL
+dim(datos4)
+```
+
+Partimos el dataset en 2 grupos para trabajar entrenamiento y validación 
+```{r}
+set.seed(12)
+n = nrow(datos4) 
+n
+frac_train <- .70
+mascara <- sample(c(rep("train", 3343), rep("test", n -3343)), n)
+entrevali <- split(datos4, mascara)
+entrevali$train
+```
+
+```{r}
+model.rf <- randomForest(formula = cant_accidentes ~ ., importance = TRUE ,data = entrevali$train)
+varImpPlot(model.rf)
+```
+
+```{r}
+preds <- predict(model.rf,data = entrevali$train)
+real <- entrevali$train$cant_accidentes
+plot(real, preds)
+
+summary 
+
+RMSE <- sqrt(mean((real - preds)^2))
+RMSE
+
+```
+
+```{r}
+library(randomForestExplainer)
+
+plot_min_depth_distribution(model.rf)
+explain_forest(model.rf, interactions = TRUE, data = datos4)
+```
+
+
+
+
+
+

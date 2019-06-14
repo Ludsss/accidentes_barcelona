@@ -1,0 +1,202 @@
+---
+title: "Random Forest"
+date: "10/5/2019"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+Se crea conexión con la bbdd postgres
+```{r}
+#install.packages("RPostgreSQL")
+require("RPostgreSQL")
+
+# Guardar el Password para poder posteriormente eliminarlo
+pw <- {"ludo"}
+
+# Leer el driver de PostgreSQL
+drv <- dbDriver("PostgreSQL")
+
+# Crear la conexion con la base de datos
+con <- dbConnect(drv, dbname = "accidentes_barcelona",
+                 host = "192.168.0.165", port = 5432,
+                 user = "postgres", password = pw)
+
+# Eliminar el Password
+rm(pw) 
+
+# Chequear que existe la tabla de la base de datos para comprobar la conexión
+dbExistsTable(con, "descripcion_carnet")
+
+```
+
+Importación paquetes más genéricos
+```{r}
+library(readr)
+library(ISLR)
+library(ggplot2)
+library(caret)
+library(dplyr)
+library(magrittr)
+library(tidyverse)
+library(rpart)
+library(randomForest)
+library(randomForestExplainer)
+```
+
+Importación data de veh?culos
+```{r}
+vehiculo <- dbGetQuery(con, "SELECT * FROM vehiculo_involucrado")
+head(vehiculo)
+```
+
+Importación tablas relacionadas con veh?culos 
+```{r}
+tipologia <-dbGetQuery(con, "SELECT * FROM descripcion_tipologia_vehiculo")
+head(tipologia)
+```
+
+```{r}
+marca <-dbGetQuery(con, "SELECT * FROM descripcion_marca_vehiculo")
+head(marca)
+```
+
+```{r}
+color <-dbGetQuery(con, "SELECT * FROM descripcion_color_vehiculo")
+head(color)
+```
+
+```{r}
+carnet <-dbGetQuery(con, "SELECT * FROM descripcion_carnet")
+head(carnet)
+```
+
+Combinación de las tablas
+
+```{r}
+datos1 <- merge(x = vehiculo, y = tipologia, by = "id_desc_tipologia", all = TRUE)
+names(datos1)
+```
+
+```{r}
+datos2 <- merge(x = datos1, y = marca, by = "id_desc_marca", all = TRUE)
+names(datos2)
+```
+
+```{r}
+datos3 <- merge(x = datos2, y = carnet, by = "id_desc_carnet", all = TRUE)
+names(datos3)
+```
+
+```{r}
+datos4 <- merge(x = datos3, y = color , by = "id_desc_color", all = TRUE)
+names(datos4)
+```
+
+Comprobación
+
+```{r}
+head(datos4)
+```
+
+Revisión de filas y columnas totales
+```{r}
+
+dim(datos4)
+```
+
+Selección de columnas con las que se trabajará
+
+```{r}
+datos5<- datos4[,c("antiguedad_carnet", "desc_tipologia", "desc_marca", "desc_color", "desc_carnet")]
+head(datos5)
+```
+
+
+Agrupación por vehiculos
+```{r}
+datos6 <- datos5 %>%
+  group_by(antiguedad_carnet, desc_tipologia, desc_marca, desc_color, desc_carnet) %>%
+  summarise(cantvehiculos=n())
+datos6
+```
+```{r}
+#datos6$desc_tipologia<-as.factor(datos6$desc_tipologia)
+#datos6$desc_marca<-as.factor(datos6$desc_marca)
+#datos6$desc_color<-as.factor(datos6$desc_color)
+#datos6$desc_carnet<-as.factor(datos6$desc_carnet)
+```
+
+```{r}
+datos7 <- datos4 %>%
+  group_by(antiguedad_carnet, id_desc_tipologia, id_desc_marca, id_desc_color, id_desc_carnet) %>%
+  summarise(cantvehiculos=n())
+
+```
+
+
+Partición del dataset en 2 grupos: entrenamiento y validación 
+```{r}
+set.seed(12)
+n = nrow(datos7) 
+n
+frac_train <- .70
+mascara <- sample(c(rep("train", 3343), rep("test", n -3343)), n)
+entrevali <- split(datos7, mascara)
+entrevali$train
+```
+
+
+```{r}
+model.rf <- randomForest(formula = cantvehiculos ~ antiguedad_carnet + id_desc_tipologia + id_desc_marca + id_desc_color + id_desc_carnet , importance = TRUE ,data = entrevali$train, na.action=na.roughfix)
+varImpPlot(model.rf)
+
+```
+
+```{r}
+preds <- predict(model.rf,data = entrevali$train)
+real <- entrevali$train$cantvehiculos
+plot(real, preds)
+```
+
+```{r}
+varImpPlot(model.rf)
+plot(model.rf$predicted)
+```
+
+```{r}
+RMSE <- sqrt(mean((real - preds)^2))
+RMSE
+
+importance(model.rf)
+```
+
+```{r}
+explain_forest(model.rf, interactions = TRUE, data = datos7)
+
+```
+
+
+
+Resumen de veh?culos seg?n su tipolog?a
+
+```{r}
+datos10<-  datos1
+
+datos_grafico <- datos10 %>%
+  group_by(desc_tipologia) %>%
+  summarise(cantvehiculos=n()) %>%
+  arrange(desc(cantvehiculos))
+datos_grafico
+
+library(knitr)
+datos_grafico
+kable( datos_grafico , caption = "BBDD `airquality` con `kable()`"
+       , align = c('l', 'c', 'r', 'r', 'c', 'l')
+       , col.names = c("Tipo de veh?culo", "Cantidad 2015 a 2017")
+       , row.names = TRUE
+       , digits = 1
+      )
+
+```
+
